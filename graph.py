@@ -8,6 +8,12 @@ st.set_page_config(page_title="Graphique des actions BRVM",
 #le titre de la web_app
 st.title('Evolution des actions BRVM')
 
+
+
+
+
+
+
 #les grandes lignes
 st.markdown(""" les actions les plus couteuses de la  BRVM  """)
 les_grandes_capitalisations = pd.DataFrame(
@@ -46,6 +52,9 @@ data['Date'] = pd.to_datetime(data['Date'])
 
 data["Symbole"] = data["source"]
 data["Cours"] = data["Cours Normal"]
+
+# "DATA" est une erreur de saisie dans la source (ne correspond à aucune société) : on l'exclut
+data = data[data["Symbole"] != "DATA"]
 
 
 st.write("""Graphique des actions BRVM""")
@@ -118,6 +127,126 @@ if voir_tout:
 #iframe pour ajouter des elements exterme
 #st.iframe(src="https://docs.streamlit.io")
 
-with st.container():
-    st.markdown("Utiliser ce boutton pour charge votre data set")
-    st.button("APPUYER ICI")
+## Autres outils d'annalyse
+## une courbe de prediction des cours
+## une analyse basé sur les resultats, du chiffre d'affaire des entreprises
+
+# --- Correspondance entre les noms utilisés dans DATA.csv et les tickers officiels BRVM ---
+# DATA.csv contient des noms saisis à la main (ex: "Tractafric", "BOA_SN") qui ne
+# correspondent pas aux tickers officiels utilisés dans le fichier Excel (ex: "PRSC", "BOAS").
+# Ce dictionnaire fait le lien entre les deux. Clé = valeur dans DATA.csv, valeur = ticker Excel.
+CORRESPONDANCE_SYMBOLES = {
+    "Vivo energy": "SHEC",
+    "AGL": "SDSC",
+    "ECOBANK_CI": "ECOC",
+    "Filtisac": "FTSC",
+    "LNBB": "LNBB",
+    "NEI-CEDA": "NEIC",
+    "Bernabe": "BNBC",
+    "Nestle": "NTLC",
+    "ETIT": "ETIT",
+    "Total ci": "TTLC",
+    "Setao": "STAC",
+    "BOA_SN": "BOAS",
+    "SGB CI": "SGBC",
+    "Sucrivoire": "SCRC",
+    "SIBC": "SIBC",
+    "BOA_NIGER": "BOAN",
+    "Sicable": "CABC",
+    "SOGB": "SOGC",
+    "Sicor_ci": "SICC",
+    "BOA_MALI": "BOAM",
+    "Sitab_ci": "STBC",
+    "Sonatel": "SNTS",
+    "SMBC": "SMBC",
+    "BOA_CI": "BOAC",
+    "SODE CI": "SDCC",
+    "Solibra": "SLBC",
+    "BOA_BENIN": "BOAB",
+    "BICC": "BICC",
+    "Servair": "ABJC",
+    "SEMC": "SEMC",
+    "NSIA": "NSBC",
+    "Uniwax": "UNXC",
+    "Onatel bf": "ONTBF",
+    "ORAGROUP_TOGO": "ORGT",
+    "Unilever": "UNLC",
+    "BICB": "BICB",
+    "Cfao": "CFAC",
+    "CORIS_BANK": "CBIBF",
+    "Orange ci": "ORAC",
+    "Palm ci": "PALC",
+    "SAFCA": "SAFC",
+    "CIE CI": "CIEC",
+    "Saph": "SPHC",
+    "Total senegal": "TTLS",
+    "Tractafric": "PRSC",
+    "BOA_BF": "BOABF",
+    "Erium ci": "SIVC",  # Air Liquide CI
+}
+
+
+def vers_ticker_officiel(nom_action):
+    """Traduit un nom d'action tel qu'il apparaît dans DATA.csv vers son ticker officiel BRVM."""
+    return CORRESPONDANCE_SYMBOLES.get(nom_action)
+
+
+# --- Chargement des indicateurs financiers (CA, Résultat net, Dividende) ---
+FICHIER_FINANCIER = 'Données CA - RN - DIV 2023-2025.xlsx'
+
+
+@st.cache_data
+def charger_feuille_financiere(nom_feuille):
+    """Lit une feuille du classeur financier et normalise ses colonnes.
+    Les feuilles ont 2 lignes d'en-tête avant les vraies colonnes,
+    d'où header=2. On repasse ensuite les colonnes en noms lisibles.
+    """
+    feuille = pd.read_excel(FICHIER_FINANCIER, sheet_name=nom_feuille, header=2)
+    feuille.columns = ['Symbole', 'Societe', '2023', '2024', '2025']
+    feuille = feuille.dropna(subset=['Symbole'])
+    return feuille
+
+
+ca = charger_feuille_financiere('CA')
+resultat_net = charger_feuille_financiere('Résultat_net')
+dividende = charger_feuille_financiere('Dividende')
+
+st.divider()
+st.subheader(f"Indicateurs financiers de {action_choisie}")
+
+ticker = vers_ticker_officiel(action_choisie)
+
+if ticker is None:
+    st.warning(
+        f"'{action_choisie}' n'a pas de correspondance connue dans le fichier financier. "
+        "Cette action est peut-être mal renseignée à la source (DATA.csv)."
+    )
+else:
+    indicateurs = {
+        "ca_valeur": ("Chiffre d'affaires", ca),
+        "rn_valeur": ("Résultat net", resultat_net),
+        "div_valeur": ("Dividende par action", dividende),
+    }
+
+    for nom_colonne, (libelle_affiche, tableau) in indicateurs.items():
+        ligne = tableau[tableau['Symbole'] == ticker]
+
+        if ligne.empty:
+            st.info(f"Pas de données '{libelle_affiche}' disponibles pour {action_choisie}.")
+            continue
+
+        # value_name utilise nom_colonne (sans apostrophe ni espace) car Vega-Lite,
+        # le moteur derrière st.bar_chart, échoue silencieusement sur certains noms
+        # de champs contenant une apostrophe (ex: "Chiffre d'affaires").
+        evolution = ligne.melt(
+            id_vars=['Symbole', 'Societe'],
+            value_vars=['2023', '2024', '2025'],
+            var_name='Année',
+            value_name=nom_colonne,
+        ).dropna(subset=[nom_colonne])
+
+        st.markdown(f"**{libelle_affiche}**")
+        if evolution.empty:
+            st.info(f"Aucune valeur renseignée pour '{libelle_affiche}'.")
+        else:
+            st.bar_chart(evolution.set_index('Année')[nom_colonne])
