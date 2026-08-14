@@ -222,18 +222,13 @@ if ticker is None:
         "Cette action est peut-être mal renseignée à la source (DATA.csv)."
     )
 else:
-    indicateurs = {
-        "ca_valeur": ("Chiffre d'affaires", ca),
-        "rn_valeur": ("Résultat net", resultat_net),
-        "div_valeur": ("Dividende par action", dividende),
-    }
-
-    for nom_colonne, (libelle_affiche, tableau) in indicateurs.items():
+    def afficher_indicateur_brut(nom_colonne, libelle_affiche, tableau):
+        """Affiche le graphique en barres d'un indicateur brut (CA, RN ou Dividende)."""
         ligne = tableau[tableau['Symbole'] == ticker]
 
         if ligne.empty:
             st.info(f"Pas de données '{libelle_affiche}' disponibles pour {action_choisie}.")
-            continue
+            return
 
         # value_name utilise nom_colonne (sans apostrophe ni espace) car Vega-Lite,
         # le moteur derrière st.bar_chart, échoue silencieusement sur certains noms
@@ -250,3 +245,80 @@ else:
             st.info(f"Aucune valeur renseignée pour '{libelle_affiche}'.")
         else:
             st.bar_chart(evolution.set_index('Année')[nom_colonne])
+
+    def calculer_croissance(tableau, ticker):
+        """Calcule la variation en % d'une année sur l'autre (2024 vs 2023, 2025 vs 2024)."""
+        ligne = tableau[tableau['Symbole'] == ticker]
+        if ligne.empty:
+            return pd.DataFrame()
+
+        paires_annees = [('2023', '2024'), ('2024', '2025')]
+        lignes_croissance = []
+        for annee_prec, annee_actuelle in paires_annees:
+            valeur_prec = ligne[annee_prec].values[0]
+            valeur_actuelle = ligne[annee_actuelle].values[0]
+            if pd.notna(valeur_prec) and pd.notna(valeur_actuelle) and valeur_prec != 0:
+                taux = ((valeur_actuelle - valeur_prec) / valeur_prec) * 100
+                lignes_croissance.append({"Année": annee_actuelle, "croissance": taux})
+
+        return pd.DataFrame(lignes_croissance)
+
+    def afficher_croissance(tableau, libelle_indicateur, legende):
+        """Affiche le graphique en barres de la croissance annuelle d'un indicateur."""
+        st.markdown(f"**Croissance {libelle_indicateur}**")
+        croissance = calculer_croissance(tableau, ticker)
+        if croissance.empty:
+            st.info(f"Pas assez d'années disponibles pour calculer la croissance {libelle_indicateur} de {action_choisie}.")
+        else:
+            st.bar_chart(croissance.set_index('Année')['croissance'])
+            st.caption(legende)
+
+    # --- 1) Chiffre d'affaires + sa croissance ---
+    afficher_indicateur_brut("ca_valeur", "Chiffre d'affaires", ca)
+    afficher_croissance(ca, "du chiffre d'affaires", "Croissance du CA en % par rapport à l'année précédente")
+
+    # --- 2) Résultat net + sa croissance ---
+    afficher_indicateur_brut("rn_valeur", "Résultat net", resultat_net)
+    afficher_croissance(resultat_net, "du résultat net", "Croissance du résultat net en % par rapport à l'année précédente")
+
+    # --- 3) Dividende ---
+    afficher_indicateur_brut("div_valeur", "Dividende par action", dividende)
+
+    # --- 4) Marge nette = Résultat net / Chiffre d'affaires ---
+    st.markdown("**Marge nette**")
+
+    ligne_ca = ca[ca['Symbole'] == ticker]
+    ligne_rn = resultat_net[resultat_net['Symbole'] == ticker]
+
+    if ligne_ca.empty or ligne_rn.empty:
+        st.info(f"Pas assez de données pour calculer la marge nette de {action_choisie}.")
+    else:
+        annees = ['2023', '2024', '2025']
+        lignes_marge = []
+        for annee in annees:
+            valeur_ca = ligne_ca[annee].values[0]
+            valeur_rn = ligne_rn[annee].values[0]
+            if pd.notna(valeur_ca) and pd.notna(valeur_rn) and valeur_ca != 0:
+                marge = (valeur_rn / valeur_ca) * 100
+                lignes_marge.append({"Année": annee, "marge_nette": marge})
+
+        if not lignes_marge:
+            st.info(f"Aucune année avec CA et Résultat net disponibles pour {action_choisie}.")
+        else:
+            marge_nette = pd.DataFrame(lignes_marge)
+            st.line_chart(marge_nette.set_index('Année')['marge_nette'])
+            st.caption("Marge nette en % (Résultat net / Chiffre d'affaires)")
+
+            # Une marge nette hors de cette plage indique presque toujours une erreur
+            # de saisie dans le fichier Excel source (CA ou RN mal renseigné), pas un
+            # vrai résultat d'entreprise.
+            marges_suspectes = marge_nette[
+                (marge_nette['marge_nette'] > 100) | (marge_nette['marge_nette'] < -100)
+            ]
+            if not marges_suspectes.empty:
+                annees_suspectes = ", ".join(marges_suspectes['Année'])
+                st.warning(
+                    f"Marge nette anormale détectée pour {annees_suspectes} "
+                    f"({action_choisie}) — vérifie le CA et le Résultat net dans le "
+                    "fichier Excel source, une valeur semble mal saisie."
+                )
