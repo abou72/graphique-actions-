@@ -202,6 +202,11 @@ def afficher_croissance(tableau, ticker, action_choisie, libelle_indicateur, leg
     else:
         st.bar_chart(croissance.set_index('Année')['croissance'])
         st.caption(legende)
+        # Commentaire basé sur la croissance de la dernière année disponible
+        derniere_annee = croissance.iloc[-1]
+        commentaire = commenter_croissance(derniere_annee['croissance'], libelle_indicateur)
+        if commentaire:
+            st.markdown(f"_{commentaire}_")
 
 
 def valeur_annee(tableau, ticker, annee):
@@ -232,6 +237,38 @@ def calculer_croissance_annee(tableau, ticker, annee):
     if valeur_prec is None or valeur_actuelle is None or valeur_prec == 0:
         return None
     return ((valeur_actuelle - valeur_prec) / valeur_prec) * 100
+
+
+def commenter_croissance(taux, libelle_indicateur):
+    """Génère un commentaire textuel qualifiant un taux de croissance selon des seuils simples."""
+    if taux is None:
+        return None
+    if taux > 20:
+        return f"Forte croissance {libelle_indicateur} ({taux:.1f}%)."
+    elif taux > 5:
+        return f"Croissance solide {libelle_indicateur} ({taux:.1f}%)."
+    elif taux > 0:
+        return f"Croissance modérée {libelle_indicateur} ({taux:.1f}%)."
+    elif taux > -5:
+        return f"Légère baisse {libelle_indicateur} ({taux:.1f}%)."
+    else:
+        return f"Baisse marquée {libelle_indicateur} ({taux:.1f}%)."
+
+
+def commenter_marge_nette(marge):
+    """Génère un commentaire textuel qualifiant une marge nette selon des seuils simples."""
+    if marge is None:
+        return None
+    if marge < 0:
+        return f"L'entreprise est en perte sur cette période (marge nette de {marge:.1f}%)."
+    elif marge < 5:
+        return f"Marge nette faible ({marge:.1f}%)."
+    elif marge < 10:
+        return f"Marge nette correcte ({marge:.1f}%)."
+    elif marge < 20:
+        return f"Marge nette confortable ({marge:.1f}%)."
+    else:
+        return f"Marge nette très élevée ({marge:.1f}%)."
 
 
 # =====================================================================
@@ -372,6 +409,12 @@ with onglet_financier:
                     f"({action_choisie}) — vérifie le CA et le Résultat net dans le "
                     "fichier Excel source, une valeur semble mal saisie."
                 )
+            else:
+                # Commentaire basé sur la marge nette de la dernière année disponible
+                derniere_marge = marge_nette.iloc[-1]['marge_nette']
+                commentaire_marge = commenter_marge_nette(derniere_marge)
+                if commentaire_marge:
+                    st.markdown(f"_{commentaire_marge}_")
 
         # --- Export ---
         tableau_export = pd.DataFrame({'Année': annees})
@@ -390,7 +433,6 @@ with onglet_financier:
 # --- 3) COMPARATEUR ---------------------------------------------------
 with onglet_comparateur:
     st.header("Comparateur d'entreprises")
-    st.markdown("la Comparaison est plus pertimente entre les entreprise du meme secteur d'activité ")
 
     entreprises_comparees = st.multiselect(
         "Sélectionnez 2 à 5 entreprises à comparer",
