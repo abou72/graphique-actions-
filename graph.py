@@ -6,7 +6,7 @@ st.set_page_config(page_title="Graphique des actions BRVM",
                     page_icon="📈",
                     layout="centered")
 #le titre de la web_app
-st.title('Evolution des actions BRVM')
+st.title('Outils de visualisation des actions BRVM et des indicateurs financier')
 
 
 
@@ -14,47 +14,45 @@ st.title('Evolution des actions BRVM')
 
 
 
-#les grandes lignes
-st.markdown(""" les actions les plus couteuses de la  BRVM  """)
-les_grandes_capitalisations = pd.DataFrame(
-    {
-        "Solibra": [41000],
-        "Sonatel": [31500],
-        "Unilever": [52000],
-        "Nsia Bank": [23000],
-        "Sitab" : [23405]
-    },
-    #index=["Solibra", "Sonatel", "Unilever", "Nsia Bank"],
-)
-st.table(les_grandes_capitalisations)
-
-st.markdown(""" Les actions les moins couteuses de la BRVM""")
-low_actions=pd.DataFrame(
-    {
-        "ETIT" : [75],
-        "SEMC" : [1500],
-        "UNXC" : [1800],
-        "BNBC" : [1985],
-        "CFAC" : [1695]
-    }
-)
-st.table(low_actions)
-
-
-
+#introduction
+st.markdown("""
+La BRVM regroupe 47 sociétés cotées réparties dans plusieurs secteurs
+d'activité — banques, télécoms, agro-industrie, distribution — au sein
+de l'espace UEMOA. Les cours présentés dans cette application couvrent
+l'ensemble de ces valeurs et vous permettent de suivre leur évolution
+dans le temps, ainsi que leurs principaux indicateurs financiers
+(chiffre d'affaires, résultat net, dividende).
+""")
 
 st.logo("BRVM.png",size="large")
 
 # --- Chargement des données ---
-data = pd.read_csv('DATA.csv')
+@st.cache_data
+def charger_cours():
+    """Charge et prépare le fichier des cours boursiers."""
+    donnees = pd.read_csv('DATA.csv')
+    donnees['Date'] = pd.to_datetime(donnees['Date'])
+    donnees["Symbole"] = donnees["source"]
+    donnees["Cours"] = donnees["Cours Normal"]
+    # "DATA" est une erreur de saisie dans la source (ne correspond à aucune société) : on l'exclut
+    donnees = donnees[donnees["Symbole"] != "DATA"]
+    return donnees
 
-data['Date'] = pd.to_datetime(data['Date'])
 
-data["Symbole"] = data["source"]
-data["Cours"] = data["Cours Normal"]
-
-# "DATA" est une erreur de saisie dans la source (ne correspond à aucune société) : on l'exclut
-data = data[data["Symbole"] != "DATA"]
+try:
+    data = charger_cours()
+except FileNotFoundError:
+    st.error(
+        "Fichier 'DATA.csv' introuvable. Vérifie qu'il se trouve bien dans le même "
+        "dossier que graph.py avant de relancer l'application."
+    )
+    st.stop()
+except KeyError as erreur:
+    st.error(
+        f"Colonne manquante dans DATA.csv ({erreur}). Vérifie que le fichier contient "
+        "bien les colonnes 'Date', 'source' et 'Cours Normal'."
+    )
+    st.stop()
 
 
 st.write("""Graphique des actions BRVM""")
@@ -112,6 +110,13 @@ st.subheader(f"Cours de {action_choisie}")
 
 st.area_chart(df_action.set_index('Date')['Cours'],height=400, color=["#0000FF80"])
 
+st.download_button(
+    label=f"Exporter les cours de {action_choisie} (CSV)",
+    data=df_action.to_csv(index=False).encode('utf-8'),
+    file_name=f"cours_{action_choisie}.csv",
+    mime="text/csv",
+)
+
 
 
 st.divider()
@@ -123,6 +128,28 @@ if voir_tout:
         df_sym = data_filtree[data_filtree['Symbole'] == symbole].sort_values('Date')
         st.subheader(symbole)
         st.line_chart(df_sym.set_index('Date')['Cours'])
+
+st.divider()
+
+# --- Comparaison de plusieurs actions sur un même graphique ---
+st.subheader("Comparer plusieurs actions")
+st.markdown(" Pour effectuer une comparaison entre les cours, veillez choisir des actions du meme secteur d'activité ")
+actions_a_comparer = st.multiselect(
+    "Choisissez 2 à 5 actions à comparer",
+    actions,
+    default=[action_choisie],
+    max_selections=5,
+)
+
+if len(actions_a_comparer) >= 2:
+    data_comparaison = data_filtree[data_filtree['Symbole'].isin(actions_a_comparer)]
+    # Format large : une colonne par action, pour que st.line_chart superpose les courbes
+    tableau_comparaison = data_comparaison.pivot_table(
+        index='Date', columns='Symbole', values='Cours'
+    )
+    st.line_chart(tableau_comparaison)
+elif len(actions_a_comparer) == 1:
+    st.info("Sélectionne au moins une deuxième action pour afficher une comparaison.")
 
 #iframe pour ajouter des elements exterme
 #st.iframe(src="https://docs.streamlit.io")
@@ -207,9 +234,16 @@ def charger_feuille_financiere(nom_feuille):
     return feuille
 
 
-ca = charger_feuille_financiere('CA')
-resultat_net = charger_feuille_financiere('Résultat_net')
-dividende = charger_feuille_financiere('Dividende')
+try:
+    ca = charger_feuille_financiere('CA')
+    resultat_net = charger_feuille_financiere('Résultat_net')
+    dividende = charger_feuille_financiere('Dividende')
+except FileNotFoundError:
+    st.error(
+        f"Fichier '{FICHIER_FINANCIER}' introuvable. Vérifie qu'il se trouve bien dans "
+        "le même dossier que graph.py avant de relancer l'application."
+    )
+    st.stop()
 
 st.divider()
 st.subheader(f"Indicateurs financiers de {action_choisie}")
@@ -222,8 +256,11 @@ if ticker is None:
         "Cette action est peut-être mal renseignée à la source (DATA.csv)."
     )
 else:
-    def afficher_indicateur_brut(nom_colonne, libelle_affiche, tableau):
-        """Affiche le graphique en barres d'un indicateur brut (CA, RN ou Dividende)."""
+    def afficher_indicateur_brut(nom_colonne, libelle_affiche, tableau, diviseur=1, unite=""):
+        """Affiche le graphique en barres d'un indicateur brut (CA, RN ou Dividende).
+        diviseur/unite permettent d'afficher de grands montants en Md FCFA plutôt
+        qu'en valeur brute illisible (ex: 82623385000 -> 82.62 Md FCFA).
+        """
         ligne = tableau[tableau['Symbole'] == ticker]
 
         if ligne.empty:
@@ -240,10 +277,13 @@ else:
             value_name=nom_colonne,
         ).dropna(subset=[nom_colonne])
 
-        st.markdown(f"**{libelle_affiche}**")
+        libelle_complet = f"{libelle_affiche} ({unite})" if unite else libelle_affiche
+        st.markdown(f"**{libelle_complet}**")
         if evolution.empty:
             st.info(f"Aucune valeur renseignée pour '{libelle_affiche}'.")
         else:
+            if diviseur != 1:
+                evolution[nom_colonne] = (evolution[nom_colonne] / diviseur).round(2)
             st.bar_chart(evolution.set_index('Année')[nom_colonne])
 
     def calculer_croissance(tableau, ticker):
@@ -274,15 +314,15 @@ else:
             st.caption(legende)
 
     # --- 1) Chiffre d'affaires + sa croissance ---
-    afficher_indicateur_brut("ca_valeur", "Chiffre d'affaires", ca)
+    afficher_indicateur_brut("ca_valeur", "Chiffre d'affaires", ca, diviseur=1_000_000_000, unite="Md FCFA")
     afficher_croissance(ca, "du chiffre d'affaires", "Croissance du CA en % par rapport à l'année précédente")
 
     # --- 2) Résultat net + sa croissance ---
-    afficher_indicateur_brut("rn_valeur", "Résultat net", resultat_net)
+    afficher_indicateur_brut("rn_valeur", "Résultat net", resultat_net, diviseur=1_000_000_000, unite="Md FCFA")
     afficher_croissance(resultat_net, "du résultat net", "Croissance du résultat net en % par rapport à l'année précédente")
 
     # --- 3) Dividende ---
-    afficher_indicateur_brut("div_valeur", "Dividende par action", dividende)
+    afficher_indicateur_brut("div_valeur", "Dividende par action", dividende, unite="FCFA")
 
     # --- 4) Marge nette = Résultat net / Chiffre d'affaires ---
     st.markdown("**Marge nette**")
@@ -322,3 +362,23 @@ else:
                     f"({action_choisie}) — vérifie le CA et le Résultat net dans le "
                     "fichier Excel source, une valeur semble mal saisie."
                 )
+
+    # --- Export des indicateurs financiers de l'action sélectionnée ---
+    tableau_export = pd.DataFrame({'Année': ['2023', '2024', '2025']})
+
+    def valeurs_par_annee(tableau):
+        ligne = tableau[tableau['Symbole'] == ticker]
+        if ligne.empty:
+            return [None, None, None]
+        return [ligne[a].values[0] for a in ['2023', '2024', '2025']]
+
+    tableau_export["Chiffre d'affaires"] = valeurs_par_annee(ca)
+    tableau_export["Résultat net"] = valeurs_par_annee(resultat_net)
+    tableau_export["Dividende par action"] = valeurs_par_annee(dividende)
+
+    st.download_button(
+        label=f"Exporter les indicateurs financiers de {action_choisie} (CSV)",
+        data=tableau_export.to_csv(index=False).encode('utf-8'),
+        file_name=f"indicateurs_{action_choisie}.csv",
+        mime="text/csv",
+    )
