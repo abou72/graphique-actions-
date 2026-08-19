@@ -27,12 +27,10 @@ st.logo("BRVM.png", size="large")
 @st.cache_data
 def charger_cours():
     """Charge et prépare le fichier des cours boursiers."""
-    donnees = pd.read_csv('DATA.csv')
+    donnees = pd.read_excel('DATA.xlsx', sheet_name='Sheet1')
     donnees['Date'] = pd.to_datetime(donnees['Date'])
-    donnees["Symbole"] = donnees["source"]
+    donnees["Symbole"] = donnees["Symbole"]
     donnees["Cours"] = donnees["Cours Normal"]
-    # "DATA" est une erreur de saisie dans la source (ne correspond à aucune société) : on l'exclut
-    donnees = donnees[donnees["Symbole"] != "DATA"]
     return donnees
 
 
@@ -40,76 +38,76 @@ try:
     data = charger_cours()
 except FileNotFoundError:
     st.error(
-        "Fichier 'DATA.csv' introuvable. Vérifie qu'il se trouve bien dans le même "
+        "Fichier 'DATA.xlsx' introuvable. Vérifie qu'il se trouve bien dans le même "
         "dossier que graph.py avant de relancer l'application."
     )
     st.stop()
 except KeyError as erreur:
     st.error(
-        f"Colonne manquante dans DATA.csv ({erreur}). Vérifie que le fichier contient "
-        "bien les colonnes 'Date', 'source' et 'Cours Normal'."
+        f"Colonne manquante dans DATA.xlsx ({erreur}). Vérifie que le fichier contient "
+        "bien les colonnes 'Date', 'Symbole' et 'Cours Normal'."
     )
     st.stop()
 
 actions = sorted(data['Symbole'].unique())
 
-# --- Correspondance entre les noms utilisés dans DATA.csv et les tickers officiels BRVM ---
-# DATA.csv contient des noms saisis à la main (ex: "Tractafric", "BOA_SN") qui ne
-# correspondent pas aux tickers officiels utilisés dans le fichier Excel (ex: "PRSC", "BOAS").
-# Ce dictionnaire fait le lien entre les deux. Clé = valeur dans DATA.csv, valeur = ticker Excel.
+# --- Correspondance entre les codes utilisés dans DATA.xlsx et les tickers officiels BRVM ---
+# DATA.xlsx contient ses propres codes (ex: "TRACTAFRIC", "BOABC") qui ne correspondent
+# pas aux tickers officiels utilisés dans le fichier Excel financier (ex: "PRSC", "BOAC").
+# Ce dictionnaire fait le lien entre les deux. Clé = valeur dans DATA.xlsx, valeur = ticker Excel.
 CORRESPONDANCE_SYMBOLES = {
-    "Vivo energy": "SHEC",
     "AGL": "SDSC",
-    "ECOBANK_CI": "ECOC",
-    "Filtisac": "FTSC",
-    "LNBB": "LNBB",
-    "NEI-CEDA": "NEIC",
-    "Bernabe": "BNBC",
-    "Nestle": "NTLC",
-    "ETIT": "ETIT",
-    "Total ci": "TTLC",
-    "Setao": "STAC",
-    "BOA_SN": "BOAS",
-    "SGB CI": "SGBC",
-    "Sucrivoire": "SCRC",
-    "SIBC": "SIBC",
-    "BOA_NIGER": "BOAN",
-    "Sicable": "CABC",
-    "SOGB": "SOGC",
-    "Sicor_ci": "SICC",
-    "BOA_MALI": "BOAM",
-    "Sitab_ci": "STBC",
-    "Sonatel": "SNTS",
-    "SMBC": "SMBC",
-    "BOA_CI": "BOAC",
-    "SODE CI": "SDCC",
-    "Solibra": "SLBC",
-    "BOA_BENIN": "BOAB",
-    "BICC": "BICC",
-    "Servair": "ABJC",
-    "SEMC": "SEMC",
-    "NSIA": "NSBC",
-    "Uniwax": "UNXC",
-    "Onatel bf": "ONTBF",
-    "ORAGROUP_TOGO": "ORGT",
-    "Unilever": "UNLC",
+    "BERNABE_CI": "BNBC",
     "BICB": "BICB",
-    "Cfao": "CFAC",
+    "BICC": "BICC",
+    "BOAB": "BOAB",
+    "BOABC": "BOAC",
+    "BOABF": "BOABF",
+    "BOABM": "BOAM",
+    "BOABN": "BOAN",
+    "BOABS": "BOAS",
+    "CFAO": "CFAC",
+    "CIE": "CIEC",
     "CORIS_BANK": "CBIBF",
-    "Orange ci": "ORAC",
-    "Palm ci": "PALC",
+    "ECOBANK_CI": "ECOC",
+    "ERIUM_CI": "SIVC",  # Air Liquide CI
+    "ETIT": "ETIT",
+    "FILTISAC": "FTSC",
+    "LNBB": "LNBB",
+    "NEICEDA": "NEIC",
+    "NESTLE_CI": "NTLC",
+    "NSIA": "NSBC",
+    "ONATEL": "ONTBF",
+    "ORAGROUP_TOGO": "ORGT",
+    "ORANGE": "ORAC",
+    "PALM_CI": "PALC",
     "SAFCA": "SAFC",
-    "CIE CI": "CIEC",
-    "Saph": "SPHC",
-    "Total senegal": "TTLS",
-    "Tractafric": "PRSC",
-    "BOA_BF": "BOABF",
-    "Erium ci": "SIVC",  # Air Liquide CI
+    "SAPH_CI": "SPHC",
+    "SEMC": "SEMC",
+    "SERVAIR": "ABJC",
+    "SETAO": "STAC",
+    "SGB_CI": "SGBC",
+    "SIBC": "SIBC",
+    "SICABLE": "CABC",
+    "SICOR": "SICC",
+    "SITAB_CI": "STBC",
+    "SMBC": "SMBC",
+    "SODECI": "SDCC",
+    "SOGCB_CI": "SOGC",
+    "SOLIBRA_CI": "SLBC",
+    "SONATEL": "SNTS",
+    "SURCRIVOIRE": "SCRC",
+    "TOTAL_CI": "TTLC",
+    "TOTAL_SN": "TTLS",
+    "TRACTAFRIC": "PRSC",
+    "UNILEVER_CI": "UNLC",
+    "UNIWAX": "UNXC",
+    "VIVO": "SHEC",
 }
 
 
 def vers_ticker_officiel(nom_action):
-    """Traduit un nom d'action tel qu'il apparaît dans DATA.csv vers son ticker officiel BRVM."""
+    """Traduit un code d'action tel qu'il apparaît dans DATA.xlsx vers son ticker officiel BRVM."""
     return CORRESPONDANCE_SYMBOLES.get(nom_action)
 
 
@@ -361,7 +359,7 @@ with onglet_financier:
     if ticker_selectionne is None:
         st.warning(
             f"'{action_choisie}' n'a pas de correspondance connue dans le fichier financier. "
-            "Cette action est peut-être mal renseignée à la source (DATA.csv)."
+            "Cette action est peut-être mal renseignée à la source (DATA.xlsx)."
         )
     else:
         # --- Chiffre d'affaires + sa croissance ---
