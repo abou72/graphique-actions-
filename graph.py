@@ -63,6 +63,42 @@ except KeyError as erreur:
 
 actions = sorted(data['Symbole'].unique())
 
+# --- Normalisation des secteurs d'activité ---
+# La colonne 'Secteur d'activités' contient des variantes orthographiques du même
+# secteur (ex: "Industriels"/"Industreils", "Telecommunication"/"Telecommunications",
+# majuscule/minuscule) selon la façon dont chaque ligne a été saisie. On les
+# regroupe ici sous un libellé unique et propre.
+NORMALISATION_SECTEURS = {
+    "consomation discretionnaire": "Consommation discrétionnaire",
+    "consommation discretionnaire": "Consommation discrétionnaire",
+    "consommation de base": "Consommation de base",
+    "consommations de base": "Consommation de base",
+    "energie": "Énergie",
+    "industreils": "Industriels",
+    "industriels": "Industriels",
+    "services financiers": "Services financiers",
+    "services publics": "Services publics",
+    "telecommunication": "Télécommunications",
+    "telecommunications": "Télécommunications",
+}
+
+
+def normaliser_secteur(libelle_brut):
+    """Nettoie un libellé de secteur (espaces, casse, variantes orthographiques)."""
+    if pd.isna(libelle_brut):
+        return None
+    cle = libelle_brut.strip().lower()
+    return NORMALISATION_SECTEURS.get(cle, libelle_brut.strip())
+
+
+if "Secteur d'activités" in data.columns:
+    data["Secteur"] = data["Secteur d'activités"].apply(normaliser_secteur)
+    secteur_par_symbole = data.drop_duplicates('Symbole').set_index('Symbole')['Secteur'].to_dict()
+    secteurs_disponibles = sorted({s for s in secteur_par_symbole.values() if s is not None})
+else:
+    secteur_par_symbole = {}
+    secteurs_disponibles = []
+
 # --- Correspondance entre les codes utilisés dans DATA.xlsx et les tickers officiels BRVM ---
 # DATA.xlsx contient ses propres codes (ex: "TRACTAFRIC", "BOABC") qui ne correspondent
 # pas aux tickers officiels utilisés dans le fichier Excel financier (ex: "PRSC", "BOAC").
@@ -301,6 +337,33 @@ def commenter_marge_nette(marge):
         return f"Marge nette très élevée ({marge:.1f}%)."
 
 
+def generer_graphique_comparateur_barres(entreprises, valeurs, titre, ylabel):
+    """Génère un graphique en barres comparant plusieurs entreprises (une barre par
+    entreprise), en image PNG, pour l'insérer dans le PDF du comparateur.
+    Ignore les entreprises sans valeur. Retourne None si aucune donnée n'est disponible.
+    """
+    donnees = [(e, v) for e, v in zip(entreprises, valeurs) if v is not None]
+    if not donnees:
+        return None
+
+    entreprises_valides, valeurs_valides = zip(*donnees)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    couleurs_barres = ["#c0392b" if v < 0 else "#0b3d2e" for v in valeurs_valides]
+    ax.bar(entreprises_valides, valeurs_valides, color=couleurs_barres)
+    ax.axhline(0, color="#999999", linewidth=0.8)
+    ax.set_title(titre, fontsize=11)
+    ax.set_ylabel(ylabel, fontsize=9)
+    ax.grid(alpha=0.3, axis='y')
+    plt.setp(ax.get_xticklabels(), rotation=30, ha='right', fontsize=8)
+
+    tampon = io.BytesIO()
+    fig.savefig(tampon, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    tampon.seek(0)
+    return tampon
+
+
 def generer_graphique_barres(annees, valeurs, titre, ylabel, type_graphique='bar'):
     """Génère un petit graphique (barres ou ligne) en image PNG pour l'insérer dans le PDF.
     Ignore les années sans valeur. Retourne None si aucune donnée n'est disponible.
@@ -492,6 +555,84 @@ def generer_rapport_pdf(action_choisie, ticker, df_action):
     return tampon_pdf
 
 
+def generer_rapport_comparateur_pdf(tableau_comparateur, annee_comparee, secteur_filtre):
+    """Construit un rapport PDF résumant la comparaison entre plusieurs entreprises
+    pour une année donnée : tableau comparatif + graphiques par indicateur.
+    """
+    tampon_pdf = io.BytesIO()
+    document = SimpleDocTemplate(
+        tampon_pdf, pagesize=A4,
+        topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm,
+    )
+    styles = getSampleStyleSheet()
+    style_titre = ParagraphStyle('TitreRapport', parent=styles['Title'], textColor=colors.HexColor('#0b3d2e'))
+    style_section = ParagraphStyle('SectionRapport', parent=styles['Heading2'], textColor=colors.HexColor('#0b3d2e'))
+    style_normal = styles['Normal']
+
+    elements = []
+    elements.append(Paragraph(f"Comparateur BRVM — {annee_comparee}", style_titre))
+    elements.append(Paragraph(f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}", style_normal))
+    if secteur_filtre and secteur_filtre != "Tous les secteurs":
+        elements.append(Paragraph(f"Secteur : {secteur_filtre}", style_normal))
+    entreprises_liste = ", ".join(tableau_comparateur.index.tolist())
+    elements.append(Paragraph(f"Entreprises comparées : {entreprises_liste}", style_normal))
+    elements.append(Spacer(1, 0.6 * cm))
+
+    # --- Tableau comparatif ---
+    elements.append(Paragraph("Tableau comparatif", style_section))
+    entetes = ["Entreprise"] + list(tableau_comparateur.columns)
+    lignes_tableau = [entetes]
+    for entreprise, ligne in tableau_comparateur.iterrows():
+        lignes_tableau.append(
+            [entreprise] + [f"{v:.2f}" if pd.notna(v) else "—" for v in ligne]
+        )
+    tableau_pdf = Table(lignes_tableau, repeatRows=1)
+    tableau_pdf.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0b3d2e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f2f2f2')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    elements.append(tableau_pdf)
+    elements.append(Spacer(1, 0.5 * cm))
+
+    # --- Graphiques comparatifs ---
+    entreprises = tableau_comparateur.index.tolist()
+    graphiques = [
+        (generer_graphique_comparateur_barres(entreprises, tableau_comparateur["Chiffre d'affaires (Md FCFA)"].tolist(), "Chiffre d'affaires", "Md FCFA")),
+        (generer_graphique_comparateur_barres(entreprises, tableau_comparateur["Résultat net (Md FCFA)"].tolist(), "Résultat net", "Md FCFA")),
+        (generer_graphique_comparateur_barres(entreprises, tableau_comparateur["Marge nette (%)"].tolist(), "Marge nette", "%")),
+        (generer_graphique_comparateur_barres(entreprises, tableau_comparateur["Croissance CA (%)"].tolist(), "Croissance du CA", "%")),
+        (generer_graphique_comparateur_barres(entreprises, tableau_comparateur["Croissance RN (%)"].tolist(), "Croissance du résultat net", "%")),
+        (generer_graphique_comparateur_barres(entreprises, tableau_comparateur["Dividende par action (FCFA)"].tolist(), "Dividende par action", "FCFA")),
+    ]
+    graphiques = [img for img in graphiques if img is not None]
+
+    largeur_image, hauteur_image = 8 * cm, 4.6 * cm
+    lignes_grille = []
+    for i in range(0, len(graphiques), 2):
+        paire = graphiques[i:i + 2]
+        ligne_images = [Image(img, width=largeur_image, height=hauteur_image) for img in paire]
+        if len(ligne_images) == 1:
+            ligne_images.append("")
+        lignes_grille.append(ligne_images)
+
+    if lignes_grille:
+        grille = Table(lignes_grille, colWidths=[largeur_image + 0.3 * cm] * 2)
+        grille.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(grille)
+
+    document.build(elements)
+    tampon_pdf.seek(0)
+    return tampon_pdf
+
+
 # =====================================================================
 # BARRE LATÉRALE — sélection commune aux onglets 1 et 2
 # =====================================================================
@@ -668,11 +809,30 @@ with onglet_financier:
 with onglet_comparateur:
     st.header("Comparateur d'entreprises")
 
+    if secteurs_disponibles:
+        secteur_filtre = st.selectbox(
+            "Filtrer par secteur d'activité (optionnel)",
+            ["Tous les secteurs"] + secteurs_disponibles,
+            key="comparateur_secteur",
+        )
+        if secteur_filtre == "Tous les secteurs":
+            actions_disponibles_comparateur = actions
+        else:
+            actions_disponibles_comparateur = [
+                a for a in actions if secteur_par_symbole.get(a) == secteur_filtre
+            ]
+            st.caption(
+                f"{len(actions_disponibles_comparateur)} entreprise(s) dans le secteur "
+                f"« {secteur_filtre} »."
+            )
+    else:
+        actions_disponibles_comparateur = actions
+
     entreprises_comparees = st.multiselect(
         "Sélectionnez 2 à 5 entreprises à comparer",
-        actions,
+        actions_disponibles_comparateur,
         max_selections=5,
-        key="comparateur_entreprises",
+        key=f"comparateur_entreprises_{secteur_filtre if secteurs_disponibles else 'tous'}",
     )
     annee_comparee = st.selectbox("Choisissez une année", ['2023', '2024', '2025'], key="comparateur_annee")
 
@@ -747,3 +907,16 @@ with onglet_comparateur:
                 file_name=f"comparateur_{annee_comparee}.csv",
                 mime="text/csv",
             )
+
+            if st.button("Générer le rapport PDF du comparateur", key="bouton_pdf_comparateur"):
+                with st.spinner("Génération du PDF en cours..."):
+                    pdf_comparateur = generer_rapport_comparateur_pdf(
+                        tableau_comparateur, annee_comparee, secteur_filtre if secteurs_disponibles else None
+                    )
+                st.download_button(
+                    label="Télécharger le rapport PDF",
+                    data=pdf_comparateur,
+                    file_name=f"comparateur_{annee_comparee}.pdf",
+                    mime="application/pdf",
+                    key="telechargement_pdf_comparateur",
+                )
